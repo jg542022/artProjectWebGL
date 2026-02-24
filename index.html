@@ -460,7 +460,8 @@
                     lastTouchY = e.touches[0].clientY;
 
                     numfingers = e.touches.length;
-                    touchLock = true;
+                    if (e.touches.length > 1)
+                        touchLock = true;
                 }
             }
 
