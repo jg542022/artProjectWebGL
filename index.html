@@ -435,7 +435,6 @@
             canvas.addEventListener("touchmove", dragMove);
             canvas.addEventListener("touchend", dragEnd);
 
-            let lastTouchX, lastTouchY;
 
             function dragStart(e) {
                 const rect = canvas.getBoundingRect();
@@ -1233,6 +1232,8 @@
         var reverbAmount = 4.0;
         var camPosX = 0;
         var camPosY = 800;
+
+        var lastTouchX, lastTouchY;
     </script>
 </body>
 </html>
