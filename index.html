@@ -438,8 +438,8 @@
 
             function dragStart(e) {
                 const rect = canvas.getBoundingRect();
-                lastTouchX = e.touches[0].clientX - rect.left;
-                lastTouchY = e.touches[0].clientY - rect.top;
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
             }
 
             function dragMove(e) {
