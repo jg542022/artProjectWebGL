@@ -450,12 +450,17 @@
 
             var lastTouchX, lastTouchY;
             var numfingers = 0;
+            var primaryTouch = 0;
     
             function dragStart(e) {
                 e.preventDefault();
                 if (audioContext.state === "suspended")
                     audioContext.resume();
-                if (e.touches.length > 3) return;
+
+                if (e.touches[0])
+                    primaryTouch = 0;
+
+                if (e.touches.length > 2) return;
 
                 if (numfingers === 0) {
                     lastTouchX = e.touches[0].clientX;
@@ -469,8 +474,8 @@
 
             function dragMove(e) {
                 e.preventDefault();
-                if (e.touches.length > 3) return;
-                const touch = e.touches[0];
+                if (e.touches.length > 2) return;
+                const touch = e.touches[primaryTouch];
 
                 switch (numfingers)
                 {
@@ -479,9 +484,6 @@
                         break;
                     case 2:
                         onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
-                        break;
-                    case 3:
-                        onZoom(touch.deltaY - lastTouchY);
                         break;
                     default:
                         break;
@@ -494,6 +496,8 @@
             function dragEnd(e) {
                 if (e.touches.length === 0)
                     numfingers = 0;
+                if (!e.touches[0] && e.touches[1])
+                    primaryTouch = 1;
             }
 
             function lockChangeAlert() {
