@@ -452,6 +452,7 @@
             var lastTouchDist;
             var numfingers = 0;
             var touchLock = false;
+            var zoomLock = 1;
     
             function calcTouchDist(touches) {
                 let x = (touches[0].clientX - touches[1].clientX);
@@ -487,8 +488,19 @@
                     onMouseMove((touch.clientX - lastTouchX) * 2, (touch.clientY - lastTouchY) * 2);
                 else {
                     let touchDist = calcTouchDist(e.touches);
-                    onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
-                    onZoom((touchDist - lastTouchDist) * -0.01);
+                    if (lastTouchDist - touchDist > 0.1)
+                        zoomLock = 0;
+                    else {
+                        if (zoomLock >= 5)
+                            zoomLock = -1;
+                        if (zoomLock > 0)
+                            zoomLock++;
+                    }
+
+                    if (zoomLock !== 0)
+                        onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
+                    if (zoomLock === 0)
+                        onZoom((touchDist - lastTouchDist) * -0.02);
                 }
 
                 lastTouchX = touch.clientX;
