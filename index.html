@@ -39,6 +39,19 @@
             transform: translate(-50%, -50%);
             z-index: -1;
         }
+
+        #text {
+            color: white;
+            display: flex;
+            justify-content: center;
+            display: block;
+            z-index: 3;
+
+            position: absolute;
+            left: 50%;
+            top: 0%;
+            transform: translate(-50%, 0%);
+        }
     </style>
     <audio loop src="./resources/Drums.wav"></audio>
 </head>
@@ -437,15 +450,24 @@
 
 
             function dragStart(e) {
-                const rect = canvas.getBoundingRect();
+                e.preventDefault();
                 lastTouchX = e.touches[0].clientX;
                 lastTouchY = e.touches[0].clientY;
+
+                numfingers = e.touches.length;
             }
 
             function dragMove(e) {
                 e.preventDefault();
                 const touch = e.touches[0];
-                onMouseMove(touch.clientX - lastTouchX, touch.clientY - lastTouchY);
+
+                if (numfingers === 1)
+                    onMouseMove((touch.clientX - lastTouchX) * 1.5, (touch.clientY - lastTouchY) * 1.5);
+                else
+                    onScroll((touch.clientX - lastTouchX) * 1.5, (touch.clientY - lastTouchY) * 1.5);
+
+                lastTouchX = touch.clientX;
+                lastTouchY = touch.clientY;
             }
 
             function dragEnd() {
@@ -464,6 +486,13 @@
             // -------------- Handle Inputs --------------
             function updateMousePosition(e) {
                 onMouseMove(e.movementX, e.movementY);
+            }
+            function updateScrollWheel(e) {
+                e.preventDefault();
+                if (e.ctrlKey)
+                    onZoom(e.deltaX, e.deltaY);
+                else
+                    onScroll(e.deltaX, e.deltaY);
             }
 
             function onMouseMove(deltaX, deltaY) {
@@ -530,37 +559,36 @@
                 }
             }
 
-            function updateScrollWheel(e) {
-                if (e.ctrlKey) {
-                    e.preventDefault();
-                    tmpX = camPosX + Math.sin(cameraLookAtX) * 5 * e.deltaY;
-                    tmpY = camPosY + Math.cos(cameraLookAtX) * 5 * e.deltaY;
 
-                    if (tmpX > 4900)
-                        tmpX = 4900;
-                    else if (tmpX < -4900)
-                        tmpX = -4900;
-                    if (tmpY > 4900)
-                        tmpY = 4900;
-                    else if (tmpY < -4900)
-                        tmpY = -4900;
+            function onScroll(deltaX, deltaY) {
+                var tmp = cameraLookAtY;
+                tmp += 0.001 * deltaY;
+                if (tmp < -30 * Math.PI / 180)
+                    tmp = -30 * Math.PI / 180;
+                else if (tmp > 60 * Math.PI / 180)
+                    tmp = 60 * Math.PI / 180;
+                cameraLookAtY = tmp;
 
-                    camPosX = tmpX;
-                    camPosY = tmpY;
-                }
-                else {
-                    var tmp = cameraLookAtY;
-                    tmp += 0.001 * e.deltaY;
-                    if (tmp < -30 * Math.PI / 180)
-                        tmp = -30 * Math.PI / 180;
-                    else if (tmp > 60 * Math.PI / 180)
-                        tmp = 60 * Math.PI / 180;
-                    cameraLookAtY = tmp;
+                tmp = cameraLookAtX;
+                tmp += 0.001 * deltaX;
+                cameraLookAtX = tmp;
+            }
 
-                    tmp = cameraLookAtX;
-                    tmp += 0.001 * e.deltaX;
-                    cameraLookAtX = tmp;
-                }
+            function onZoom(deltaX, deltaY) {
+                tmpX = camPosX + Math.sin(cameraLookAtX) * 5 * deltaY;
+                tmpY = camPosY + Math.cos(cameraLookAtX) * 5 * deltaY;
+
+                if (tmpX > 4900)
+                    tmpX = 4900;
+                else if (tmpX < -4900)
+                    tmpX = -4900;
+                if (tmpY > 4900)
+                    tmpY = 4900;
+                else if (tmpY < -4900)
+                    tmpY = -4900;
+
+                camPosX = tmpX;
+                camPosY = tmpY;
             }
 
             function keypress(e) {
@@ -1234,6 +1262,7 @@
         var camPosY = 800;
 
         var lastTouchX, lastTouchY;
+        var numfingers = 0;
     </script>
 </body>
 </html>
