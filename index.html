@@ -430,6 +430,29 @@
             document.addEventListener("keydown", keypress);
             document.addEventListener("pointerlockchange", lockChangeAlert);
 
+            // Mobile
+            canvas.addEventListener("touchstart", dragStart);
+            canvas.addEventListener("touchmove", dragMove);
+            canvas.addEventListener("touchend", dragEnd);
+
+            let lastTouchX, lastTouchY;
+
+            function dragStart(e) {
+                const rect = canvas.getBoundingRect();
+                lastTouchX = e.touches[0].clientX - rect.left;
+                lastTouchY = e.touches[0].clientY - rect.top;
+            }
+
+            function dragMove(e) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                onMouseMove(touch.clientX - lastTouchX, touch.clientY - lastTouchY);
+            }
+
+            function dragEnd() {
+
+            }
+
             function lockChangeAlert() {
                 if (document.pointerLockElement === canvas)
                     document.addEventListener("mousemove", updateMousePosition);
@@ -441,8 +464,12 @@
 
             // -------------- Handle Inputs --------------
             function updateMousePosition(e) {
+                onMouseMove(e.movementX, e.movementY);
+            }
+
+            function onMouseMove(deltaX, deltaY) {
                 // filter
-                eqFrequency += e.movementX * 2;
+                eqFrequency += deltaX * 2;
                 
                 if (eqFrequency <= note.F(4)) {
                     eqFrequency = note.F(4);
@@ -451,21 +478,22 @@
                 else if (eqFrequency >= 10000)
                     eqFrequency = 10000;
                 else
-                    spacingSpeed += e.movementX * 0.001;
+                    spacingSpeed += deltaX * 0.001;
 
                 // pitch
-                oscFrequency -= e.movementY * 0.1;
+                oscFrequency -= deltaY * 0.1;
 
                 if (oscFrequency <= note.F(2))
                     oscFrequency = note.F(2);
                 else if (oscFrequency >= note.F(5))
                     oscFrequency = note.F(5);
                 else
-                    fAngleRadians += e.movementY * 0.001;
+                    fAngleRadians += deltaY * 0.001;
 
                 filter.frequency.setValueAtTime(eqFrequency, audioContext.currentTime);
                 dGain.gain.value = 0.3 + (eqFrequency - note.F(4)) * 0.00001;
                 changeOscFreq(oscFrequency);
+
             }
 
             async function captureCursor() {
