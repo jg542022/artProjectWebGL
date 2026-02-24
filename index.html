@@ -448,13 +448,20 @@
             canvas.addEventListener("touchmove", dragMove);
             canvas.addEventListener("touchend", dragEnd);
 
+            var lastTouchX, lastTouchY;
+            var numfingers = 0;
+            var touchLock = false;
 
             function dragStart(e) {
                 e.preventDefault();
-                lastTouchX = e.touches[0].clientX;
-                lastTouchY = e.touches[0].clientY;
+                audioContext.resume();
+                if (!touchLock) {
+                    lastTouchX = e.touches[0].clientX;
+                    lastTouchY = e.touches[0].clientY;
 
-                numfingers = e.touches.length;
+                    numfingers = e.touches.length;
+                    touchLock = true;
+                }
             }
 
             function dragMove(e) {
@@ -471,7 +478,7 @@
             }
 
             function dragEnd() {
-
+                touchLock = false;
             }
 
             function lockChangeAlert() {
@@ -1260,9 +1267,6 @@
         var reverbAmount = 4.0;
         var camPosX = 0;
         var camPosY = 800;
-
-        var lastTouchX, lastTouchY;
-        var numfingers = 0;
     </script>
 </body>
 </html>
