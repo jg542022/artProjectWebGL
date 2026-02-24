@@ -477,8 +477,9 @@
                 lastTouchY = touch.clientY;
             }
 
-            function dragEnd() {
-                touchLock = false;
+            function dragEnd(e) {
+                if (e.touches.length === 0)
+                    touchLock = false;
             }
 
             function lockChangeAlert() {
