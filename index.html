@@ -452,7 +452,7 @@
             var lastTouchDist;
             var numfingers = 0;
             var touchLock = false;
-            var zoomLock = 1;
+            var zoomLock = 1; //1+ - both. 0 - zoom. -1 - scroll.
     
             function calcTouchDist(touches) {
                 let x = (touches[0].clientX - touches[1].clientX);
@@ -499,7 +499,7 @@
 
                     if (zoomLock !== 0)
                         onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
-                    if (zoomLock === 0)
+                    if (zoomLock >= 0)
                         onZoom((touchDist - lastTouchDist) * -0.03);
                 }
 
