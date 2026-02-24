@@ -491,9 +491,9 @@
                     if (lastTouchDist - touchDist > 0.1)
                         zoomLock = 0;
                     else {
-                        if (zoomLock >= 5)
+                        if (zoomLock >= 10)
                             zoomLock = -1;
-                        if (zoomLock > 0)
+                        else if (zoomLock > 0)
                             zoomLock++;
                     }
 
@@ -509,8 +509,8 @@
 
             function dragEnd(e) {
                 if (e.touches.length === 0)
-                    zoomLock = 1;
                     touchLock = false;
+                zoomLock = 1;
             }
 
             function lockChangeAlert() {
