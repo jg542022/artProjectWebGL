@@ -449,30 +449,47 @@
             canvas.addEventListener("touchend", dragEnd);
 
             var lastTouchX, lastTouchY;
+            var lastTouchDist;
             var numfingers = 0;
             var touchLock = false;
+    
+            function calcTouchDist(touches) {
+                let x = (touches[0].clientX - touches[1].clientX);
+                let y = (touches[0].clientY - touches[1].clientY);
+
+                return Math.sqrt(x * x + y * y);
+            }
+
 
             function dragStart(e) {
                 e.preventDefault();
-                audioContext.resume();
+                if (audioContext.state === "suspended")
+                    audioContext.resume();
+                if (e.touches.length > 2) return;
                 if (!touchLock) {
                     lastTouchX = e.touches[0].clientX;
                     lastTouchY = e.touches[0].clientY;
 
                     numfingers = e.touches.length;
-                    if (e.touches.length > 1)
+                    if (e.touches.length === 2) {
                         touchLock = true;
+                        lastTouchDist = calcTouchDist(e.touches);
+                    }
                 }
             }
 
             function dragMove(e) {
                 e.preventDefault();
+                if (e.touches.length > 2) return;
                 const touch = e.touches[0];
 
                 if (numfingers === 1)
-                    onMouseMove((touch.clientX - lastTouchX) * 1.5, (touch.clientY - lastTouchY) * 1.5);
-                else
-                    onScroll((touch.clientX - lastTouchX) * 1.5, (touch.clientY - lastTouchY) * 1.5);
+                    onMouseMove((touch.clientX - lastTouchX) * 2, (touch.clientY - lastTouchY) * 2);
+                else {
+                    let touchDist = calcTouchDist(e.touches);
+                    onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
+                    onZoom(touchDist - lastTouchDist);
+                }
 
                 lastTouchX = touch.clientX;
                 lastTouchY = touch.clientY;
@@ -499,7 +516,7 @@
             function updateScrollWheel(e) {
                 e.preventDefault();
                 if (e.ctrlKey)
-                    onZoom(e.deltaX, e.deltaY);
+                    onZoom(e.deltaY);
                 else
                     onScroll(e.deltaX, e.deltaY);
             }
@@ -583,7 +600,7 @@
                 cameraLookAtX = tmp;
             }
 
-            function onZoom(deltaX, deltaY) {
+            function onZoom(deltaY) {
                 tmpX = camPosX + Math.sin(cameraLookAtX) * 5 * deltaY;
                 tmpY = camPosY + Math.cos(cameraLookAtX) * 5 * deltaY;
 
