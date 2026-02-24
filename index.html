@@ -488,7 +488,7 @@
                     onMouseMove((touch.clientX - lastTouchX) * 2, (touch.clientY - lastTouchY) * 2);
                 else {
                     let touchDist = calcTouchDist(e.touches);
-                    if (lastTouchDist - touchDist > 0.1)
+                    if (Math.absolute(lastTouchDist - touchDist) > 0.2)
                         zoomLock = 0;
                     else {
                         if (zoomLock >= 10)
@@ -500,7 +500,7 @@
                     if (zoomLock !== 0)
                         onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
                     if (zoomLock === 0)
-                        onZoom((touchDist - lastTouchDist) * -0.02);
+                        onZoom((touchDist - lastTouchDist) * -0.03);
                 }
 
                 lastTouchX = touch.clientX;
