@@ -449,59 +449,39 @@
             canvas.addEventListener("touchend", dragEnd);
 
             var lastTouchX, lastTouchY;
-            var lastTouchDist = 0;
             var numfingers = 0;
-            var touchLock = false;
-            var zoomLock = 1; //1+ - both. 0 - zoom. -1 - scroll.
     
-            function calcTouchDist(touches) {
-                let x = (touches[0].clientX - touches[1].clientX);
-                let y = (touches[0].clientY - touches[1].clientY);
-
-                return Math.sqrt(x * x + y * y);
-            }
-
-
             function dragStart(e) {
                 e.preventDefault();
                 if (audioContext.state === "suspended")
                     audioContext.resume();
-                if (e.touches.length > 2) return;
-                if (!touchLock) {
+                if (e.touches.length > 3) return;
+
+                if (numfingers === 0) {
                     lastTouchX = e.touches[0].clientX;
                     lastTouchY = e.touches[0].clientY;
-
+                }
+                
+                if (numfingers < e.touches.length) {
                     numfingers = e.touches.length;
-                    if (e.touches.length === 2) {
-                        touchLock = true;
-                        lastTouchDist = calcTouchDist(e.touches);
-                    }
                 }
             }
 
             function dragMove(e) {
                 e.preventDefault();
-                if (e.touches.length > 2) return;
+                if (e.touches.length > 3) return;
                 const touch = e.touches[0];
 
-                if (numfingers === 1)
-                    onMouseMove((touch.clientX - lastTouchX) * 2, (touch.clientY - lastTouchY) * 2);
-                else {
-                    let touchDist = calcTouchDist(e.touches);
-                    if (Math.absolute(lastTouchDist - touchDist) > 0.2)
-                        zoomLock = 0;
-                    else {
-                        if (zoomLock >= 10)
-                            zoomLock = -1;
-                        else if (zoomLock > 0)
-                            zoomLock++;
-                    }
-
-                    if (zoomLock != 0)
+                switch (numfingers)
+                {
+                    case 1:
+                        onMouseMove((touch.clientX - lastTouchX) * 2, (touch.clientY - lastTouchY) * 2);
+                        break;
+                    case 2:
                         onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
-                    if (zoomLock >= 0)
-                        onZoom((touchDist - lastTouchDist) * -3);
-                    lastTouchDist = touchDist;
+                        break;
+                    case 3:
+                        onZoom(touch.deltaY - lastTouchY);
                 }
 
                 lastTouchX = touch.clientX;
@@ -510,8 +490,7 @@
 
             function dragEnd(e) {
                 if (e.touches.length === 0)
-                    touchLock = false;
-                zoomLock = 1;
+                    numfingers = 0;
             }
 
             function lockChangeAlert() {
