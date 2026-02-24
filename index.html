@@ -449,7 +449,7 @@
             canvas.addEventListener("touchend", dragEnd);
 
             var lastTouchX, lastTouchY;
-            var lastTouchDist;
+            var lastTouchDist = 0;
             var numfingers = 0;
             var touchLock = false;
             var zoomLock = 1; //1+ - both. 0 - zoom. -1 - scroll.
@@ -497,10 +497,11 @@
                             zoomLock++;
                     }
 
-                    if (zoomLock !== 0)
+                    if (zoomLock != 0)
                         onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
                     if (zoomLock >= 0)
-                        onZoom((touchDist - lastTouchDist) * -0.03);
+                        onZoom((touchDist - lastTouchDist) * -3);
+                    lastTouchDist = touchDist;
                 }
 
                 lastTouchX = touch.clientX;
