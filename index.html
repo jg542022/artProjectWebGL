@@ -488,7 +488,7 @@
                 else {
                     let touchDist = calcTouchDist(e.touches);
                     onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
-                    onZoom((touchDist - lastTouchDist) * -0.25);
+                    onZoom((touchDist - lastTouchDist) * -0.01);
                 }
 
                 lastTouchX = touch.clientX;
