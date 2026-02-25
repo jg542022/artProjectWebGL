@@ -5,18 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>webgl demo</title>
     <style>
+        /* hide scrollbar in webkit */
+        body::-webkit-scrollbar { display: none; }
+        /* hide scrollbar in chromium/gecko */
         html, body {
             margin: 0;
             overflow: hidden;
         }
 
-        body {
-            background-color: black;
-        }
-
-        body::-webkit-scrollbar {
-            display: none;
-        }
+        /* Only really noticable in safari because the tab
+           bar tries to match the background color */
+        body { background-color: black; }
         
         /* make the canvas fill its container */
         #c {
@@ -26,6 +25,7 @@
             z-index: 2;
         }
 
+        /* make the background sit behind the webgl canvas */
         #bg {
             display: flex;
             justify-content: center;
@@ -39,40 +39,29 @@
             transform: translate(-50%, -50%);
             z-index: -1;
         }
-
-        #text {
-            color: white;
-            display: flex;
-            justify-content: center;
-            display: block;
-            z-index: 3;
-
-            position: absolute;
-            left: 50%;
-            top: 0%;
-            transform: translate(-50%, 0%);
-        }
     </style>
-    <audio loop src="./resources/Drums.wav"></audio>
 </head>
 <body>
+    <audio loop src="./resources/Drums.wav"></audio>
     <img id="bg" src="./resources/Vignette.png"></img>
-    <canvas id="c"></canvas>
+    <canvas id="c"></canvas> <!-- webgl canvas -->
     <script id="vertex-shader" type="x-shader/x-vertex">
-        // an attribute will recieve data from a buffer
+        // Attributes change per vertex
         attribute vec4 a_position;
         attribute vec2 a_texcoord;
         attribute vec3 a_normal;
 
+        // Uniforms change per model
         uniform vec3 u_lightWorldPosition;
         
         uniform mat4 u_world;
         uniform mat4 u_worldViewProjection;
         uniform mat4 u_worldInverseTranspose;
 
+        // Varyings get passed to the fragment shader
         varying vec2 v_texcoord;
         varying vec3 v_normal;
-        varying vec3 v_surfaceToLight;
+        varying vec3 v_surfaceToLight; // for lighting
         
         void main() {
             gl_Position = u_worldViewProjection * a_position;
@@ -85,10 +74,9 @@
         }
     </script>
     <script id="fragment-shader" type="x-shader/x-fragment">
-        // fragment shaders don't have a default precision so we need
-        // to pick one. mediump is a good default
         precision mediump float;
         
+        // Passed in from vertex shader
         varying vec2 v_texcoord;
         varying vec3 v_normal;
         varying vec3 v_surfaceToLight;
@@ -106,6 +94,486 @@
         }
     </script>
     <script>
+        // -------------- Main Entrypoint ------------------
+        async function main() {
+            const canvas = document.querySelector("#c");
+            const gl = canvas.getContext("webgl", { depth: true });
+            if (!gl) {
+                console.log("No webgl :(");
+                return;
+            }
+
+            // -------------- Set up audio player --------------
+
+            // background sounds
+            const drumsFile = document.querySelector("audio");
+            const drums = audioContext.createMediaElementSource(drumsFile);
+            drums.loop = true;
+
+            const osc1 = audioContext.createOscillator();
+            osc1.type = "square"; // sin, square, triangle, sawtooth
+            osc1.frequency.setValueAtTime(note.F(3), audioContext.currentTime);
+            const osc2= audioContext.createOscillator();
+            osc2.type = "square"; // sin, square, triangle, sawtooth
+            osc2.frequency.setValueAtTime(note.A(3), audioContext.currentTime);
+            const osc3 = audioContext.createOscillator();
+            osc3.type = "square"; // sin, square, triangle, sawtooth
+            osc3.frequency.setValueAtTime(note.C(4), audioContext.currentTime);
+            const osc4 = audioContext.createOscillator();
+            osc4.type = "square"; // sin, square, triangle, sawtooth
+            osc4.frequency.setValueAtTime(note.E(4), audioContext.currentTime);
+            const osc5 = audioContext.createOscillator();
+            osc5.type = "sine"; // sine, square, triangle, sawtooth
+            osc5.frequency.setValueAtTime(note.F(2), audioContext.currentTime);
+
+            const gain = new GainNode(audioContext);
+            gain.gain.setValueAtTime(0.2, audioContext.currentTime);
+
+            const dGain = new GainNode(audioContext);
+            dGain.gain.setValueAtTime(0.3, audioContext.currentTime);
+
+            const gain2 = new GainNode(audioContext);
+            gain2.gain.setValueAtTime(1, audioContext.currentTime);
+            
+            const filter = new BiquadFilterNode(audioContext);
+            filter.type = "lowpass";
+            filter.frequency = 440;
+            filter.Q = 0.3;
+
+            const reverb = audioContext.createConvolver();
+            reverb.buffer = createImpulseResponse(1, 4, false);
+
+            const listener = audioContext.listener;
+            setListenerOrientation(listener, 0, 0, -1, 0, 1, 0);
+            setListenerPosition(listener, 0, 0, 800);
+
+            const panner = createPanner();
+            setPannerOrientation(panner, 1, 0, 0);
+            setPannerPosition(panner, 0, 0, 0);
+
+            // --------------------------- Connection diagram -------------------------
+            // |                                                                      |
+            // | oscillators -> gain -> filter -> panner -> reverb -> gain2 -> output |
+            // |                                                       /\             |
+            // |                                                       |              |
+            // |                                            drums  -> dgain           |
+            // |                                                                      |
+            // ------------------------------------------------------------------------
+            osc1.connect(gain);
+            osc2.connect(gain);
+            osc3.connect(gain);
+            osc4.connect(gain);
+            osc5.connect(gain);
+            gain.connect(filter).connect(panner).connect(reverb).connect(gain2);
+            gain2.connect(audioContext.destination);
+            
+            drums.connect(dGain).connect(gain2);
+            // ------------------------------------------------------------------------
+
+            osc1.start(audioContext.currentTime);
+            osc2.start(audioContext.currentTime);
+            osc3.start(audioContext.currentTime);
+            osc4.start(audioContext.currentTime);
+            osc5.start(audioContext.currentTime);
+
+            function changeOscFreq(freq) {
+                osc1.frequency.setValueAtTime(freq, audioContext.currentTime);
+                osc2.frequency.setValueAtTime(freq * (note.A(3) / note.F(3)), audioContext.currentTime);
+                osc3.frequency.setValueAtTime(freq * (note.C(4) / note.F(3)), audioContext.currentTime);
+                osc4.frequency.setValueAtTime(freq * (note.E(4) / note.F(3)), audioContext.currentTime);
+                osc5.frequency.setValueAtTime(freq * (note.F(2) / note.F(3)), audioContext.currentTime);
+            }
+
+            // --------------------------------------------------
+
+            // ------------------ WebGL init --------------------
+
+            gl.enable(gl.CULL_FACE);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+
+            const vertexShaderSource = document.querySelector("#vertex-shader").text;
+            const fragmentShaderSource = document.querySelector("#fragment-shader").text;
+            
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+            
+            program = createProgram(gl, vertexShader, fragmentShader);
+            
+            // Set uniform locations
+            vertexLocation = gl.getAttribLocation(program, "a_position");
+            texcoordLocation = gl.getAttribLocation(program, "a_texcoord");
+            normalLocation = gl.getAttribLocation(program, "a_normal");
+
+            worldViewProjectionLocation = gl.getUniformLocation(program, "u_worldViewProjection");
+            worldInverseTransposeLocation = gl.getUniformLocation(program, "u_worldInverseTranspose");
+            textureLocation = gl.getUniformLocation(program, "u_texture");
+            lightWorldPositionLocation = gl.getUniformLocation(program, "u_lightWorldPosition");
+            worldLocation = gl.getUniformLocation(program, "u_world");
+
+            // Input Listeners
+            canvas.addEventListener("click", onMouseDown);
+            document.addEventListener("wheel", updateScrollWheel, {passive: false});
+            document.addEventListener("keydown", keypress);
+            document.addEventListener("pointerlockchange", lockChangeAlert);
+
+            function lockChangeAlert() {
+                if (document.pointerLockElement === canvas)
+                    document.addEventListener("mousemove", updateMousePosition);
+                else
+                    document.removeEventListener("mousemove", updateMousePosition);
+            }
+
+            async function captureCursor() {
+                await canvas.requestPointerLock({ unadjustedMovement: false });
+            }
+
+            function updateMousePosition(e) {
+                onMouseMove(e.movementX, e.movementY);
+            }
+
+            function updateScrollWheel(e) {
+                e.preventDefault();
+                if (e.ctrlKey)
+                    onZoom(e.deltaY);
+                else
+                    onScroll(e.deltaX, e.deltaY);
+            }
+
+            // Mobile input listeners
+            canvas.addEventListener("touchstart", dragStart);
+            canvas.addEventListener("touchmove", dragMove);
+            canvas.addEventListener("touchend", dragEnd);
+
+            var lastTouchX, lastTouchY;
+            var numfingers = 0;
+            var primaryTouch = 0;
+    
+            function dragStart(e) {
+                e.preventDefault();
+                if (audioContext.state === "suspended")
+                    audioContext.resume();
+
+                if (e.touches[0])
+                    primaryTouch = 0;
+
+                if (e.touches.length > 2) return;
+
+                if (numfingers === 0) {
+                    lastTouchX = e.touches[0].clientX;
+                    lastTouchY = e.touches[0].clientY;
+                }
+                
+                if (numfingers < e.touches.length) {
+                    numfingers = e.touches.length;
+                }
+            }
+
+            function dragMove(e) {
+                e.preventDefault();
+                if (e.touches.length > 2) return;
+                const touch = e.touches[primaryTouch];
+
+                switch (numfingers)
+                {
+                    case 1:
+                        onMouseMove((touch.clientX - lastTouchX) * 5, (touch.clientY - lastTouchY) * 5);
+                        break;
+                    case 2:
+                        onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
+                        break;
+                }
+
+                lastTouchX = touch.clientX;
+                lastTouchY = touch.clientY;
+            }
+
+            function dragEnd(e) {
+                if (e.touches.length === 0)
+                    numfingers = 0;
+                if (!e.touches[0] && e.touches[1])
+                    primaryTouch = 1;
+            }
+
+            // --------------------------------------------------
+
+            // ------------------ Handle Inputs -----------------
+
+            function onMouseMove(deltaX, deltaY) {
+                // filter
+                eqFrequency += deltaX * 2;
+                
+                if (eqFrequency <= note.F(4)) {
+                    eqFrequency = note.F(4);
+                    spacingSpeed = 0.0;
+                }
+                else if (eqFrequency >= 10000)
+                    eqFrequency = 10000;
+                else
+                    spacingSpeed += deltaX * 0.001;
+
+                // pitch
+                oscFrequency -= deltaY * 0.1;
+
+                if (oscFrequency <= note.F(2))
+                    oscFrequency = note.F(2);
+                else if (oscFrequency >= note.F(5))
+                    oscFrequency = note.F(5);
+                else
+                    fAngleRadians += deltaY * 0.001;
+
+                filter.frequency.setValueAtTime(eqFrequency, audioContext.currentTime);
+                dGain.gain.value = 0.3 + (eqFrequency - note.F(4)) * 0.00001;
+                changeOscFreq(oscFrequency);
+            }
+
+
+            function onMouseDown(e) {
+                if (document.pointerLockElement) {
+                    if (e.button === 0) {
+                        if (drumsFile.paused) {
+                            drumsFile.play();
+                        } else {
+                            drumsFile.pause();
+                        }
+                    } else if (e.button === 2) {
+                        //reset
+                        camPosX = 0;
+                        camPosY = 800;
+                        instrRotationRadians = 0.0;
+                        cameraLookAtX = 0.0;
+                        cameraLookAtY = 0.0;
+                        fAngleRadians = 0.0;
+                        eqFrequency = note.F(4);
+                        oscFrequency = note.F(3);
+                        spacingSpeed = 0;
+                        filter.frequency.setValueAtTime(eqFrequency, audioContext.currentTime);
+                        dGain.gain.value = 0.3 + (eqFrequency - note.F(4)) * 0.00001;
+                        changeOscFreq(oscFrequency);
+                        drumsFile.pause();
+                    }
+                } else {
+                    captureCursor();
+                    if (audioContext.state === "suspended")
+                        audioContext.resume();
+                }
+            }
+
+
+            function onScroll(deltaX, deltaY) {
+                var tmp = cameraLookAtY;
+                tmp += 0.001 * deltaY;
+                if (tmp < -30 * Math.PI / 180)
+                    tmp = -30 * Math.PI / 180;
+                else if (tmp > 60 * Math.PI / 180)
+                    tmp = 60 * Math.PI / 180;
+                cameraLookAtY = tmp;
+
+                tmp = cameraLookAtX;
+                tmp += 0.001 * deltaX;
+                cameraLookAtX = tmp;
+            }
+
+            function onZoom(deltaY) {
+                tmpX = camPosX + Math.sin(cameraLookAtX) * 5 * deltaY;
+                tmpY = camPosY + Math.cos(cameraLookAtX) * 5 * deltaY;
+
+                if (tmpX > 4900)
+                    tmpX = 4900;
+                else if (tmpX < -4900)
+                    tmpX = -4900;
+                if (tmpY > 4900)
+                    tmpY = 4900;
+                else if (tmpY < -4900)
+                    tmpY = -4900;
+
+                camPosX = tmpX;
+                camPosY = tmpY;
+            }
+
+            function keypress(e) {
+                if (e.key === 'p') {
+                    if (audioContext.state === "suspended")
+                        audioContext.resume();
+
+                    if (!isPlaying) {
+                        gain2.gain.linearRampToValueAtTime(1,
+                            audioContext.currentTime + 0.2);
+                        isPlaying = true;
+                    } else {
+                        gain2.gain.linearRampToValueAtTime(0.0001,
+                            audioContext.currentTime + 0.2);
+                        isPlaying = false;
+                    }
+                }
+            }
+
+            // --------------------------------------------------
+
+            // --------------- Create model list ----------------
+            const cube_m = await loadModel("./resources/cube.obj");
+            const f_m = await loadModel("./resources/f.obj");
+            const wall_m = await loadModel("./resources/forest-wall.obj");
+            const chair_m = await loadModel("./resources/chair.obj");
+
+            modelList.push(new createModel("f", f_m.position, f_m.texcoord, f_m.normal, "./resources/f-texture.png", gl));              //0
+            modelList.push(new createModel("cube", cube_m.position, cube_m.texcoord, cube_m.normal, "./resources/noodles.jpg", gl));    //1
+            modelList.push(new createModel("wall", wall_m.position, wall_m.texcoord, wall_m.normal, "./resources/Forest.png", gl));     //2
+            modelList.push(new createModel("chair", chair_m.position, chair_m.texcoord, chair_m.normal, "./resources/chair.png", gl));  //3
+
+            // -------------- Create Entity List ----------------
+            const numFs = 5;
+            for (var i = 0; i < numFs; ++i) {
+                entityList.push(new createEntity("f"+i, 0, [0, 0, 0], [0, deg2Rad(-90), 0], [20, 20, 20]));
+            }
+
+            cube_id = entityList.length;
+            entityList.push(new createEntity("center cube", 1, [0, 200, 0], [1, 0, 0], [50, 50, 50]));
+
+            // static things
+            floor_id = entityList.length;
+            entityList.push(new createEntity("floor", 1, [0, -400, 0], [0, 0, 0], [5200, 1, 5200]));
+            entityList.push(new createEntity("floor2", 1, [15000, -400, 0], [0, 0, 0], [5000, 1, 5000]));
+            entityList.push(new createEntity("floor3", 1, [-15000, -400, 0], [0, 0, 0], [5000, 1, 5000]));
+            entityList.push(new createEntity("wall1", 2, [5100, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
+            entityList.push(new createEntity("wall2", 2, [-5100, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
+            entityList.push(new createEntity("wall3", 2, [10000, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
+            entityList.push(new createEntity("wall4", 2, [-10000, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
+
+            entityList.push(new createEntity("chair", 3, [-2000, 100, -500], [0,deg2Rad(-135),0], [50, 50, 50]));
+            entityList.push(new createEntity("chair", 3, [-1000, 100, 400], [0,deg2Rad(-90),0], [50, 50, 50]));
+            entityList.push(new createEntity("chair", 3, [500, 100, 1000], [0,deg2Rad(0),0], [50, 50, 50]));
+
+            // ----------------------------------------------
+            
+            // -------------- Main Render Loop --------------
+            
+            function render(now) {
+                resizeCanvasToDisplaySize(gl.canvas);
+
+                // Projection matrix
+                var aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+                var zNear = 50;
+                var zFar = 50000;
+                var verticalFOV = 90 * Math.PI / 180;
+                var projectionMatrix = m4.perspective(verticalFOV, aspect, zNear, zFar);
+
+                // Delta Time is the seconds since the last frame
+                now *= 0.001;
+                var deltaTime = now - then;
+                then = now;
+
+                // update camera
+                cameraMatrix = cameraMove(
+                    [camPosX, 100, camPosY], //position
+                    [cameraLookAtY, cameraLookAtX, 0], //rotation
+                );
+
+                // update listener to move with camera
+                setListenerPosition(listener, camPosX, 0, camPosY);
+                setListenerOrientation(listener,
+                    -cameraMatrix[8], -cameraMatrix[9], -cameraMatrix[10], // -forward vector
+                    cameraMatrix[4], cameraMatrix[5], cameraMatrix[6]      // up vector
+                );
+
+
+                instrRotationRadians = deltaTime * spacingSpeed * 1.0;
+
+                // Fs
+                for (var i = 0; i < numFs; ++i) {
+                    entityList[i].rotation[1] += instrRotationRadians;
+                    entityList[i].rotation[0] = fAngleRadians;
+
+                    var angle = (i * Math.PI * 2 / numFs) - entityList[i].rotation[1];
+                    var x = Math.cos(angle) * 100 * (1.25 + spacingSpeed);
+                    var y = Math.sin(angle) * 100 * (1.25 + spacingSpeed);
+
+                    entityList[i].position = [x, 0, y];
+                    const scale = 20 + (2 * spacingSpeed);
+                    entityList[i].scale = [scale, scale, scale];
+                }
+                entityList[cube_id].rotation[1] += instrRotationRadians;
+                const scale = 50 + (10 * spacingSpeed);
+                entityList[cube_id].scale = [scale, scale, scale];
+
+                // --------------- WebGL draw calls ----------------
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+                gl.useProgram(program);
+
+                const viewMatrix = m4.inverse(cameraMatrix);
+                const viewProjectionMatrix = m4.multiply(projectionMatrix, viewMatrix);
+
+                for (var i = 0; i < entityList.length; ++i)
+                    drawEntity(entityList[i], viewProjectionMatrix, gl);
+                // -------------------------------------------------
+                
+                requestAnimationFrame(render); // Loop
+            }
+
+            
+            
+            // -------------- Resize Window Code --------------
+            
+            const canvasToDisplaySizeMap = new Map([[canvas, [300, 150]]]);
+                    
+            function onResize(entries) {
+                for (const entry of entries) {
+                    let width;
+                    let height;
+                    let dpr = window.devicePixelRatio;
+                    if (entry.devicePixelContentBoxSize) {
+                        // NOTE: Only this path gives the correct answer
+                        // The other 2 paths are an imperfect fallback
+                        // for browsers that don't provide anyway to do this
+                        width = entry.devicePixelContentBoxSize[0].inlineSize;
+                        height = entry.devicePixelContentBoxSize[0].blockSize;
+                        dpr = 1; // it's already in width and height
+                    } else if (entry.contentBoxSize) {
+                        if (entry.contentBoxSize[0]) {
+                            width = entry.contentBoxSize[0].inlineSize;
+                            height = entry.contentBoxSize[0].blockSize;
+                        } else {
+                            // legacy
+                            width = entry.contentBoxSize.inlineSize;
+                            height = entry.contentBoxSize.blockSize;
+                        }
+                    } else {
+                        // legacy
+                        width = entry.contentRect.width;
+                        height = entry.contentRect.height;
+                    }
+                    const displayWidth = Math.round(width * dpr);
+                    const displayHeight = Math.round(height * dpr);
+                    canvasToDisplaySizeMap.set(entry.target, [displayWidth, displayHeight]);
+                }
+            }
+            
+            const resizeObserver = new ResizeObserver(onResize);
+            resizeObserver.observe(canvas, {box: 'content-box'});
+            
+            function resizeCanvasToDisplaySize(canvas) {
+                // Get the size the browser is displaying the canvas in device pixels.
+                const [displayWidth, displayHeight] = canvasToDisplaySizeMap.get(canvas);
+                
+                // Check if the canvas is not the same size.
+                const needResize = canvas.width  !== displayWidth ||
+                                canvas.height !== displayHeight;
+                
+                if (needResize) {
+                    // Make the canvas the same size
+                    canvas.width  = displayWidth;
+                    canvas.height = displayHeight;
+                }
+                
+                return needResize;
+            }
+            
+            requestAnimationFrame(render);
+        }
+
+        window.onload = main;
+
         // --------------- Engine Helpers ----------------
 
         // attributes
@@ -191,6 +659,92 @@
         }
 
         // Models
+        async function loadModel(path) {
+            const response = await fetch (path);
+            const text = await response.text();
+            return parseObj(text);
+        }
+
+        function parseObj(text) {
+            // fill in 0th data since indices are base 1
+            const objPositions = [[0, 0, 0]];
+            const objTexcoords = [[0, 0]];
+            const objNormals = [[0, 0, 0]];
+
+            const objVertexData = [
+                objPositions,
+                objTexcoords,
+                objNormals,
+            ];
+
+            let webglVertexData = [
+                [], // positions
+                [], // texcoords
+                [], // normals
+            ];
+
+            function addVertex(vert) {
+                const ptn = vert.split('/');
+                ptn.forEach((objIndexStr, i) => {
+                    if (!objIndexStr) return;
+                    const objIndex = parseInt(objIndexStr);
+                    const index = objIndex + (objIndex >= 0 ? 0 : objVertexData[i].length);
+                    webglVertexData[i].push(...objVertexData[i][index]);
+                });
+            }
+
+            const keywords = {
+                v(parts) {
+                    objPositions.push(parts.map(parseFloat));
+                },
+                vn(parts) {
+                    objNormals.push(parts.map(parseFloat));
+                },
+                vt(parts) {
+                    objTexcoords.push(parts.map(parseFloat));
+                },
+                f(parts) {
+                    const numTriangles = parts.length - 2;
+                    for (let tri = 0; tri < numTriangles; ++tri) {
+                        addVertex(parts[0]);
+                        addVertex(parts[tri + 1]);
+                        addVertex(parts[tri + 2]);
+                    }
+                },
+            };
+
+            const keywordRE = /(\w*)(?: )*(.*)/;
+            const lines = text.split('\n');
+
+            for (let lineNo = 0; lineNo < lines.length; ++lineNo) {
+                const line = lines[lineNo].trim();
+                if (line === '' || line.startsWith('#')) continue;
+
+                const m = keywordRE.exec(line);
+                if (!m) continue;
+
+                const [, keyword, unparsedArgs] = m;
+                const parts = line.split(/\s+/).slice(1);
+                const handler = keywords[keyword];
+                if (!handler) {
+                    console.warn('unhandled keyword', keyword, 'at line', lineNo + 1);
+                    continue;
+                }
+                handler(parts, unparsedArgs);
+            }
+
+            //reverse texcoords
+            for (let i = 1; i < webglVertexData[1].length; i += 2) {
+                webglVertexData[1][i] = 1 - webglVertexData[1][i];
+            }
+
+            return {
+                position: webglVertexData[0],
+                texcoord: webglVertexData[1],
+                normal: webglVertexData[2],
+            };
+        }
+
         function createModel(name, vertices, texCoords, normals, texturePath, gl) {
             this["name"] = name;
             this["vertexBuffer"] = createGLBuffer(gl, vertices);
@@ -225,6 +779,83 @@
             return cameraMatrix;
         }
 
+        // audio
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContext();
+
+        function createImpulseResponse(duration, decay, reverse) {
+            var sampleRate = audioContext.sampleRate;
+            var length = sampleRate * duration;
+            var impulse = audioContext.createBuffer(2, length, sampleRate);
+            var impulseL = impulse.getChannelData(0);
+            var impulseR = impulse.getChannelData(1);
+
+            if (!decay)
+                decay = 2.0;
+            for (var i = 0; i < length; i++){
+              var n = reverse ? length - i : i;
+              impulseL[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
+              impulseR[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
+            }
+            return impulse;
+        }
+
+        function setPannerOrientation(panner, x, y, z) {
+            if (panner.orientationX) {
+                panner.orientationX.setValueAtTime(x, audioContext.currentTime);
+                panner.orientationY.setValueAtTime(y, audioContext.currentTime);
+                panner.orientationZ.setValueAtTime(z, audioContext.currentTime);
+            } else {
+                panner.setOrientation(x, y, z);
+            }
+        }
+
+        function setPannerPosition (panner, x, y, z) {
+            if (panner.positionX) {
+                panner.positionX.setValueAtTime(x, audioContext.currentTime);
+                panner.positionY.setValueAtTime(y, audioContext.currentTime);
+                panner.positionZ.setValueAtTime(z, audioContext.currentTime);
+            } else {
+                panner.setPosition(x, y, z);
+            }
+        }
+
+        function setListenerOrientation(listener, fx, fy, fz, ux, uy, uz) {
+            if (listener.forwardX) {
+                listener.forwardX.setValueAtTime(fx, audioContext.currentTime);
+                listener.forwardY.setValueAtTime(fy, audioContext.currentTime);
+                listener.forwardZ.setValueAtTime(fz, audioContext.currentTime);
+                listener.upX.setValueAtTime(ux, audioContext.currentTime);
+                listener.upY.setValueAtTime(uy, audioContext.currentTime);
+                listener.upZ.setValueAtTime(uz, audioContext.currentTime);
+            } else {
+                listener.setOrientation(fx, fy, fz, ux, uy, uz);
+            }
+        }
+
+        function setListenerPosition(listener, x, y, z) {
+            if (listener.positionX) {
+                listener.positionX.setValueAtTime(x, audioContext.currentTime);
+                listener.positionY.setValueAtTime(y, audioContext.currentTime);
+                listener.positionZ.setValueAtTime(z, audioContext.currentTime);
+            } else {
+                listener.setPosition(x, y, z);
+            }
+        }
+
+        function createPanner() {
+            const panner = audioContext.createPanner();
+            panner.panningModel = "HRTF";
+            panner.distanceModel = "inverse";
+            panner.refDistance = 100;
+            panner.maxDistance = 10000;
+            panner.rolloffFactor = 1;
+            panner.coreInnerAngle = 360;
+            panner.coneOuterAngle = 0;
+            panner.coneOuterGain = 0;
+            return panner;
+        }
+
         function createShader(gl, type, source) {
             var shader = gl.createShader(type);
             gl.shaderSource(shader, source);
@@ -254,634 +885,7 @@
             gl.deleteProgram(program);
         }
 
-        function glInitialization(gl) {
-        }
-        
-        async function main() {
-            const canvas = document.querySelector("#c");
-            const gl = canvas.getContext("webgl", { depth: true });
-            if (!gl) {
-                console.log("No webgl :(");
-                return;
-            }
-
-
-            // -------------- Set up audio player --------------
-            window.AudioContext = window.AudioContext || window.webkitAudioContext;
-            const audioContext = new AudioContext();
-
-            // background sounds
-            const drumsFile = document.querySelector("audio");
-            const drums = audioContext.createMediaElementSource(drumsFile);
-            drums.loop = true;
-
-            const osc1 = audioContext.createOscillator();
-            osc1.type = "square"; // sin, square, triangle, sawtooth
-            osc1.frequency.setValueAtTime(note.F(3), audioContext.currentTime);
-            const osc2= audioContext.createOscillator();
-            osc2.type = "square"; // sin, square, triangle, sawtooth
-            osc2.frequency.setValueAtTime(note.A(3), audioContext.currentTime);
-            const osc3 = audioContext.createOscillator();
-            osc3.type = "square"; // sin, square, triangle, sawtooth
-            osc3.frequency.setValueAtTime(note.C(4), audioContext.currentTime);
-            const osc4 = audioContext.createOscillator();
-            osc4.type = "square"; // sin, square, triangle, sawtooth
-            osc4.frequency.setValueAtTime(note.E(4), audioContext.currentTime);
-            const osc5 = audioContext.createOscillator();
-            osc5.type = "sine"; // sine, square, triangle, sawtooth
-            osc5.frequency.setValueAtTime(note.F(2), audioContext.currentTime);
-
-            function changeOscFreq(freq) {
-                osc1.frequency.setValueAtTime(freq, audioContext.currentTime);
-                osc2.frequency.setValueAtTime(freq * (note.A(3) / note.F(3)), audioContext.currentTime);
-                osc3.frequency.setValueAtTime(freq * (note.C(4) / note.F(3)), audioContext.currentTime);
-                osc4.frequency.setValueAtTime(freq * (note.E(4) / note.F(3)), audioContext.currentTime);
-                osc5.frequency.setValueAtTime(freq * (note.F(2) / note.F(3)), audioContext.currentTime);
-            }
-
-            const gain = new GainNode(audioContext);
-            gain.gain.setValueAtTime(0.2, audioContext.currentTime);
-
-            const dGain = new GainNode(audioContext);
-            dGain.gain.setValueAtTime(0.3, audioContext.currentTime);
-
-            const gain2 = new GainNode(audioContext);
-            gain2.gain.setValueAtTime(1, audioContext.currentTime);
-            
-            const filter = new BiquadFilterNode(audioContext);
-            filter.type = "lowpass";
-            filter.frequency = 440;
-            filter.Q = 0.3;
-
-            function createImpulseResponse(duration, decay, reverse) {
-                var sampleRate = audioContext.sampleRate;
-                var length = sampleRate * duration;
-                var impulse = audioContext.createBuffer(2, length, sampleRate);
-                var impulseL = impulse.getChannelData(0);
-                var impulseR = impulse.getChannelData(1);
-
-                if (!decay)
-                    decay = 2.0;
-                for (var i = 0; i < length; i++){
-                  var n = reverse ? length - i : i;
-                  impulseL[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
-                  impulseR[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
-                }
-                return impulse;
-            }
-
-            const convolver = audioContext.createConvolver();
-            convolver.buffer = createImpulseResponse(1, 4, false);
-
-            const listener = audioContext.listener;
-
-            function setPannerOrientation(x, y, z) {
-                if (panner.orientationX) {
-                    panner.orientationX.setValueAtTime(x, audioContext.currentTime);
-                    panner.orientationY.setValueAtTime(y, audioContext.currentTime);
-                    panner.orientationZ.setValueAtTime(z, audioContext.currentTime);
-                } else {
-                    panner.setOrientation(x, y, z);
-                }
-            }
-
-            function setPannerPosition(x, y, z) {
-                if (panner.positionX) {
-                    panner.positionX.setValueAtTime(x, audioContext.currentTime);
-                    panner.positionY.setValueAtTime(y, audioContext.currentTime);
-                    panner.positionZ.setValueAtTime(z, audioContext.currentTime);
-                } else {
-                    panner.setPosition(x, y, z);
-                }
-            }
-
-            function setListenerOrientation(fx, fy, fz, ux, uy, uz) {
-                if (listener.forwardX) {
-                    listener.forwardX.setValueAtTime(fx, audioContext.currentTime);
-                    listener.forwardY.setValueAtTime(fy, audioContext.currentTime);
-                    listener.forwardZ.setValueAtTime(fz, audioContext.currentTime);
-                    listener.upX.setValueAtTime(ux, audioContext.currentTime);
-                    listener.upY.setValueAtTime(uy, audioContext.currentTime);
-                    listener.upZ.setValueAtTime(uz, audioContext.currentTime);
-                } else {
-                    listener.setOrientation(fx, fy, fz, ux, uy, uz);
-                }
-            }
-
-            function setListenerPosition(x, y, z) {
-                if (listener.positionX) {
-                    listener.positionX.setValueAtTime(x, audioContext.currentTime);
-                    listener.positionY.setValueAtTime(y, audioContext.currentTime);
-                    listener.positionZ.setValueAtTime(z, audioContext.currentTime);
-                } else {
-                    listener.setPosition(x, y, z);
-                }
-            }
-
-            const panner = audioContext.createPanner();
-            panner.panningModel = "HRTF";
-            panner.distanceModel = "inverse";
-            panner.refDistance = 100;
-            panner.maxDistance = 10000;
-            panner.rolloffFactor = 1;
-            panner.coreInnerAngle = 360;
-            panner.coneOuterAngle = 0;
-            panner.coneOuterGain = 0;
-            setPannerOrientation(1, 0, 0);
-            setPannerPosition(0, 0, 0);
-
-            setListenerOrientation(0, 0, -1, 0, 1, 0);
-            setListenerPosition(0, 0, 800);
-
-            osc1.connect(gain);
-            osc2.connect(gain);
-            osc3.connect(gain);
-            osc4.connect(gain);
-            osc5.connect(gain);
-            gain.connect(filter).connect(panner).connect(convolver).connect(gain2);
-            
-            drums.connect(dGain).connect(gain2);
-
-            gain2.connect(audioContext.destination);
-
-            osc1.start(audioContext.currentTime);
-            osc2.start(audioContext.currentTime);
-            osc3.start(audioContext.currentTime);
-            osc4.start(audioContext.currentTime);
-            osc5.start(audioContext.currentTime);
-
-            // --------------------------------------------------
-
-            // ------------------ WebGL init --------------------
-
-            gl.enable(gl.CULL_FACE);
-            gl.enable(gl.DEPTH_TEST);
-            gl.depthFunc(gl.LEQUAL);
-
-            const vertexShaderSource = document.querySelector("#vertex-shader").text;
-            const fragmentShaderSource = document.querySelector("#fragment-shader").text;
-            
-            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
-            
-            program = createProgram(gl, vertexShader, fragmentShader);
-            
-            // Set uniform locations
-            vertexLocation = gl.getAttribLocation(program, "a_position");
-            texcoordLocation = gl.getAttribLocation(program, "a_texcoord");
-            normalLocation = gl.getAttribLocation(program, "a_normal");
-
-            worldViewProjectionLocation = gl.getUniformLocation(program, "u_worldViewProjection");
-            worldInverseTransposeLocation = gl.getUniformLocation(program, "u_worldInverseTranspose");
-            textureLocation = gl.getUniformLocation(program, "u_texture");
-            lightWorldPositionLocation = gl.getUniformLocation(program, "u_lightWorldPosition");
-            worldLocation = gl.getUniformLocation(program, "u_world");
-
-            // Input Listeners
-            canvas.addEventListener("click", onMouseDown);
-            document.addEventListener("wheel", updateScrollWheel, {passive: false});
-            document.addEventListener("keydown", keypress);
-            document.addEventListener("pointerlockchange", lockChangeAlert);
-
-            // Mobile
-            canvas.addEventListener("touchstart", dragStart);
-            canvas.addEventListener("touchmove", dragMove);
-            canvas.addEventListener("touchend", dragEnd);
-
-            var lastTouchX, lastTouchY;
-            var numfingers = 0;
-            var primaryTouch = 0;
-    
-            function dragStart(e) {
-                e.preventDefault();
-                if (audioContext.state === "suspended")
-                    audioContext.resume();
-
-                if (e.touches[0])
-                    primaryTouch = 0;
-
-                if (e.touches.length > 2) return;
-
-                if (numfingers === 0) {
-                    lastTouchX = e.touches[0].clientX;
-                    lastTouchY = e.touches[0].clientY;
-                }
-                
-                if (numfingers < e.touches.length) {
-                    numfingers = e.touches.length;
-                }
-            }
-
-            function dragMove(e) {
-                e.preventDefault();
-                if (e.touches.length > 2) return;
-                const touch = e.touches[primaryTouch];
-
-                switch (numfingers)
-                {
-                    case 1:
-                        onMouseMove((touch.clientX - lastTouchX) * 5, (touch.clientY - lastTouchY) * 5);
-                        break;
-                    case 2:
-                        onScroll((touch.clientX - lastTouchX) * 3, (touch.clientY - lastTouchY) * 3);
-                        break;
-                    default:
-                        break;
-                }
-
-                lastTouchX = touch.clientX;
-                lastTouchY = touch.clientY;
-            }
-
-            function dragEnd(e) {
-                if (e.touches.length === 0)
-                    numfingers = 0;
-                if (!e.touches[0] && e.touches[1])
-                    primaryTouch = 1;
-            }
-
-            function lockChangeAlert() {
-                if (document.pointerLockElement === canvas)
-                    document.addEventListener("mousemove", updateMousePosition);
-                else
-                    document.removeEventListener("mousemove", updateMousePosition);
-            }
-
-            // --------------------------------------------------
-
-            // -------------- Handle Inputs --------------
-            function updateMousePosition(e) {
-                onMouseMove(e.movementX, e.movementY);
-            }
-            function updateScrollWheel(e) {
-                e.preventDefault();
-                if (e.ctrlKey)
-                    onZoom(e.deltaY);
-                else
-                    onScroll(e.deltaX, e.deltaY);
-            }
-
-            function onMouseMove(deltaX, deltaY) {
-                // filter
-                eqFrequency += deltaX * 2;
-                
-                if (eqFrequency <= note.F(4)) {
-                    eqFrequency = note.F(4);
-                    spacingSpeed = 0.0;
-                }
-                else if (eqFrequency >= 10000)
-                    eqFrequency = 10000;
-                else
-                    spacingSpeed += deltaX * 0.001;
-
-                // pitch
-                oscFrequency -= deltaY * 0.1;
-
-                if (oscFrequency <= note.F(2))
-                    oscFrequency = note.F(2);
-                else if (oscFrequency >= note.F(5))
-                    oscFrequency = note.F(5);
-                else
-                    fAngleRadians += deltaY * 0.001;
-
-                filter.frequency.setValueAtTime(eqFrequency, audioContext.currentTime);
-                dGain.gain.value = 0.3 + (eqFrequency - note.F(4)) * 0.00001;
-                changeOscFreq(oscFrequency);
-
-            }
-
-            async function captureCursor() {
-                await canvas.requestPointerLock({ unadjustedMovement: false });
-            }
-
-            function onMouseDown(e) {
-                if (document.pointerLockElement) {
-                    if (e.button === 0) {
-                        if (drumsFile.paused) {
-                            drumsFile.play();
-                        } else {
-                            drumsFile.pause();
-                        }
-                    } else if (e.button === 2) {
-                        //reset
-                        camPosX = 0;
-                        camPosY = 800;
-                        instrRotationRadians = 0.0;
-                        cameraLookAtX = 0.0;
-                        cameraLookAtY = 0.0;
-                        fAngleRadians = 0.0;
-                        eqFrequency = note.F(4);
-                        oscFrequency = note.F(3);
-                        spacingSpeed = 0;
-                        filter.frequency.setValueAtTime(eqFrequency, audioContext.currentTime);
-                        dGain.gain.value = 0.3 + (eqFrequency - note.F(4)) * 0.00001;
-                        changeOscFreq(oscFrequency);
-                        drumsFile.pause();
-                    }
-                } else {
-                    captureCursor();
-                    if (audioContext.state === "suspended")
-                        audioContext.resume();
-                }
-            }
-
-
-            function onScroll(deltaX, deltaY) {
-                var tmp = cameraLookAtY;
-                tmp += 0.001 * deltaY;
-                if (tmp < -30 * Math.PI / 180)
-                    tmp = -30 * Math.PI / 180;
-                else if (tmp > 60 * Math.PI / 180)
-                    tmp = 60 * Math.PI / 180;
-                cameraLookAtY = tmp;
-
-                tmp = cameraLookAtX;
-                tmp += 0.001 * deltaX;
-                cameraLookAtX = tmp;
-            }
-
-            function onZoom(deltaY) {
-                tmpX = camPosX + Math.sin(cameraLookAtX) * 5 * deltaY;
-                tmpY = camPosY + Math.cos(cameraLookAtX) * 5 * deltaY;
-
-                if (tmpX > 4900)
-                    tmpX = 4900;
-                else if (tmpX < -4900)
-                    tmpX = -4900;
-                if (tmpY > 4900)
-                    tmpY = 4900;
-                else if (tmpY < -4900)
-                    tmpY = -4900;
-
-                camPosX = tmpX;
-                camPosY = tmpY;
-            }
-
-            function keypress(e) {
-                if (e.key === 'p') {
-                    if (audioContext.state === "suspended")
-                        audioContext.resume();
-
-                    if (!isPlaying) {
-                        gain2.gain.linearRampToValueAtTime(1,
-                            audioContext.currentTime + 0.2);
-                        isPlaying = true;
-                    } else {
-                        gain2.gain.linearRampToValueAtTime(0.0001,
-                            audioContext.currentTime + 0.2);
-                        isPlaying = false;
-                    }
-                }
-            }
-
-            // --------------------------------------------------
-
-            // Create model list
-            const cube_m = await loadModel("./resources/cube.obj");
-            const f_m = await loadModel("./resources/f.obj");
-            const wall_m = await loadModel("./resources/forest-wall.obj");
-            const chair_m = await loadModel("./resources/chair.obj");
-
-            modelList.push(new createModel("f", f_m.position, f_m.texcoord, f_m.normal, "./resources/f-texture.png", gl));
-            modelList.push(new createModel("cube", cube_m.position, cube_m.texcoord, cube_m.normal, "./resources/noodles.jpg", gl));
-            modelList.push(new createModel("wall", wall_m.position, wall_m.texcoord, wall_m.normal, "./resources/Forest.png", gl));
-            modelList.push(new createModel("chair", chair_m.position, chair_m.texcoord, chair_m.normal, "./resources/chair.png", gl));
-
-            // Fs
-            const numFs = 5;
-            for (var i = 0; i < numFs; ++i) {
-                entityList.push(new createEntity("f"+i, 0, [0, 0, 0], [0, deg2Rad(-90), 0], [20, 20, 20]));
-            }
-
-            cube_id = entityList.length;
-            entityList.push(new createEntity("center cube", 1, [0, 200, 0], [1, 0, 0], [50, 50, 50]));
-
-            // static things
-            floor_id = entityList.length;
-            entityList.push(new createEntity("floor", 1, [0, -400, 0], [0, 0, 0], [5200, 1, 5200]));
-            entityList.push(new createEntity("floor2", 1, [15000, -400, 0], [0, 0, 0], [5000, 1, 5000]));
-            entityList.push(new createEntity("floor3", 1, [-15000, -400, 0], [0, 0, 0], [5000, 1, 5000]));
-            entityList.push(new createEntity("wall1", 2, [5100, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
-            entityList.push(new createEntity("wall2", 2, [-5100, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
-            entityList.push(new createEntity("wall3", 2, [10000, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
-            entityList.push(new createEntity("wall4", 2, [-10000, -400, 0], [0,deg2Rad(90),0], [1000, 1000, 1000]));
-
-            entityList.push(new createEntity("chair", 3, [-2000, 100, -500], [0,deg2Rad(-135),0], [50, 50, 50]));
-            entityList.push(new createEntity("chair", 3, [-1000, 100, 400], [0,deg2Rad(-90),0], [50, 50, 50]));
-            entityList.push(new createEntity("chair", 3, [500, 100, 1000], [0,deg2Rad(0),0], [50, 50, 50]));
-            
-            // -------------- Main Render Loop --------------
-            
-            function render(now) {
-                resizeCanvasToDisplaySize(gl.canvas);
-
-                // Projection matrix
-                var aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-                var zNear = 50;
-                var zFar = 50000;
-                var fieldOfViewInRadians = 90 * Math.PI / 180;
-                var projectionMatrix = m4.perspective(fieldOfViewInRadians, aspect, zNear, zFar);
-
-                // convert the time to seconds
-                now *= 0.001;
-                var deltaTime = now - then;
-                then = now;
-
-                // update camera
-                cameraMatrix = cameraMove(
-                    [camPosX, 100, camPosY], //position
-                    [cameraLookAtY, cameraLookAtX, 0], //rotation
-                );
-
-                // listener
-                setListenerPosition(camPosX, 0, camPosY);
-                setListenerOrientation(
-                    -cameraMatrix[8], -cameraMatrix[9], -cameraMatrix[10], // -forward vector
-                    cameraMatrix[4], cameraMatrix[5], cameraMatrix[6]      // up vector
-                );
-
-                const viewMatrix = m4.inverse(cameraMatrix);
-                const viewProjectionMatrix = m4.multiply(projectionMatrix, viewMatrix);
-
-                // Update!
-                instrRotationRadians = deltaTime * spacingSpeed * 1.0;
-
-                // Fs
-                for (var i = 0; i < numFs; ++i) {
-                    entityList[i].rotation[1] += instrRotationRadians;
-                    entityList[i].rotation[0] = fAngleRadians;
-
-                    var angle = (i * Math.PI * 2 / numFs) - entityList[i].rotation[1];
-                    var x = Math.cos(angle) * 100 * (1.25 + spacingSpeed);
-                    var y = Math.sin(angle) * 100 * (1.25 + spacingSpeed);
-
-                    entityList[i].position = [x, 0, y];
-                    const scale = 20 + (2 * spacingSpeed);
-                    entityList[i].scale = [scale, scale, scale];
-                }
-                entityList[cube_id].rotation[1] += instrRotationRadians;
-                const scale = 50 + (10 * spacingSpeed);
-                entityList[cube_id].scale = [scale, scale, scale];
-
-                // draw calls
-                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-                gl.useProgram(program);
-
-                for (var i = 0; i < entityList.length; ++i)
-                    drawEntity(entityList[i], viewProjectionMatrix, gl);
-                
-                // Loop
-                requestAnimationFrame(render);
-            }
-
-            async function loadModel(path) {
-                const response = await fetch (path);
-                const text = await response.text();
-                return parseObj(text);
-            }
-
-            function parseObj(text) {
-                // fill in 0th data since indices are base 1
-                const objPositions = [[0, 0, 0]];
-                const objTexcoords = [[0, 0]];
-                const objNormals = [[0, 0, 0]];
-
-                const objVertexData = [
-                    objPositions,
-                    objTexcoords,
-                    objNormals,
-                ];
-
-                let webglVertexData = [
-                    [], // positions
-                    [], // texcoords
-                    [], // normals
-                ];
-
-                function addVertex(vert) {
-                    const ptn = vert.split('/');
-                    ptn.forEach((objIndexStr, i) => {
-                        if (!objIndexStr) return;
-                        const objIndex = parseInt(objIndexStr);
-                        const index = objIndex + (objIndex >= 0 ? 0 : objVertexData[i].length);
-                        webglVertexData[i].push(...objVertexData[i][index]);
-                    });
-                }
-
-                const keywords = {
-                    v(parts) {
-                        objPositions.push(parts.map(parseFloat));
-                    },
-                    vn(parts) {
-                        objNormals.push(parts.map(parseFloat));
-                    },
-                    vt(parts) {
-                        objTexcoords.push(parts.map(parseFloat));
-                    },
-                    f(parts) {
-                        const numTriangles = parts.length - 2;
-                        for (let tri = 0; tri < numTriangles; ++tri) {
-                            addVertex(parts[0]);
-                            addVertex(parts[tri + 1]);
-                            addVertex(parts[tri + 2]);
-                        }
-                    },
-                };
-
-                const keywordRE = /(\w*)(?: )*(.*)/;
-                const lines = text.split('\n');
-
-                for (let lineNo = 0; lineNo < lines.length; ++lineNo) {
-                    const line = lines[lineNo].trim();
-                    if (line === '' || line.startsWith('#')) continue;
-
-                    const m = keywordRE.exec(line);
-                    if (!m) continue;
-
-                    const [, keyword, unparsedArgs] = m;
-                    const parts = line.split(/\s+/).slice(1);
-                    const handler = keywords[keyword];
-                    if (!handler) {
-                        console.warn('unhandled keyword', keyword, 'at line', lineNo + 1);
-                        continue;
-                    }
-                    handler(parts, unparsedArgs);
-                }
-
-                //reverse texcoords
-                for (let i = 1; i < webglVertexData[1].length; i += 2) {
-                    webglVertexData[1][i] = 1 - webglVertexData[1][i];
-                }
-
-                return {
-                    position: webglVertexData[0],
-                    texcoord: webglVertexData[1],
-                    normal: webglVertexData[2],
-                };
-            }
-            
-            
-            // -------------- Resize Window Code --------------
-            
-            const canvasToDisplaySizeMap = new Map([[canvas, [300, 150]]]);
-                    
-            function onResize(entries) {
-                for (const entry of entries) {
-                    let width;
-                    let height;
-                    let dpr = window.devicePixelRatio;
-                    if (entry.devicePixelContentBoxSize) {
-                        // NOTE: Only this path gives the correct answer
-                        // The other 2 paths are an imperfect fallback
-                        // for browsers that don't provide anyway to do this
-                        width = entry.devicePixelContentBoxSize[0].inlineSize;
-                        height = entry.devicePixelContentBoxSize[0].blockSize;
-                        dpr = 1; // it's already in width and height
-                    } else if (entry.contentBoxSize) {
-                        if (entry.contentBoxSize[0]) {
-                            width = entry.contentBoxSize[0].inlineSize;
-                            height = entry.contentBoxSize[0].blockSize;
-                        } else {
-                            // legacy
-                            width = entry.contentBoxSize.inlineSize;
-                            height = entry.contentBoxSize.blockSize;
-                        }
-                    } else {
-                        // legacy
-                        width = entry.contentRect.width;
-                        height = entry.contentRect.height;
-                    }
-                    const displayWidth = Math.round(width * dpr);
-                    const displayHeight = Math.round(height * dpr);
-                    canvasToDisplaySizeMap.set(entry.target, [displayWidth, displayHeight]);
-                }
-            }
-            
-            const resizeObserver = new ResizeObserver(onResize);
-            resizeObserver.observe(canvas, {box: 'content-box'});
-            
-            function resizeCanvasToDisplaySize(canvas) {
-                // Get the size the browser is displaying the canvas in device pixels.
-                const [displayWidth, displayHeight] = canvasToDisplaySizeMap.get(canvas);
-                
-                // Check if the canvas is not the same size.
-                const needResize = canvas.width  !== displayWidth ||
-                                canvas.height !== displayHeight;
-                
-                if (needResize) {
-                    // Make the canvas the same size
-                    canvas.width  = displayWidth;
-                    canvas.height = displayHeight;
-                }
-                
-                return needResize;
-            }
-            
-            requestAnimationFrame(render);
-        }
-
-        window.onload = main;
+        // -------------- Note Class -----------------
 
         var note = {
             allNotes: function() {
@@ -954,7 +958,10 @@
             },
         }
 
-        // Class for all 4x4 matrix functions
+        // ----------------------------------------------
+
+        // -------------- 4x4 Matrix Class --------------
+
         var m4 = {
             identity: function() {
                 return [
@@ -1238,6 +1245,10 @@
             },
         }
 
+        // ----------------------------------------------
+
+        // ---------------- Vector Math -----------------
+
         function cross(a, b) {
             return [
                 a[1] * b[2] - a[2] * b[1],
@@ -1263,7 +1274,7 @@
                 return [0, 0, 0];
         }
 
-        
+        // ----------------------------------------------
 
         function rad2Deg(radians) {
             return radians * (180 / Math.PI);
@@ -1273,7 +1284,8 @@
             return degrees * (Math.PI / 180);
         }
 
-        // Global variables
+        // ------------ Global variables ----------------
+
         var then = 0;
         var instrRotationRadians = 0.0;
         var spacingSpeed = 0.0;
@@ -1286,6 +1298,8 @@
         var reverbAmount = 4.0;
         var camPosX = 0;
         var camPosY = 800;
+
+        // ----------------------------------------------
     </script>
 </body>
 </html>
